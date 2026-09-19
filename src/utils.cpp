@@ -23,7 +23,10 @@ void log_handler(int lvl, const char *msg, va_list args, void *p) {
     std::string logDir = static_cast<const char*>(p);
 
     if (!logDir.empty() && logDir.back() != '\\' && logDir.back() != '/') {
-      logDir += '\\';
+      // Forward slash works as a separator on Windows too, and unlike a
+      // backslash it is a real separator rather than a literal character in
+      // a filename on macOS.
+      logDir += '/';
     }
       
     logFileName << logDir << "OBS-" << std::put_time(std::localtime(&t), "%Y-%m-%d") << ".log";

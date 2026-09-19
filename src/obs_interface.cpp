@@ -256,7 +256,7 @@ void ObsInterface::create_output() {
   } else {
     blog(LOG_INFO, "Set ffmpeg_muxer settings");
     // Need to specify the exact path for ffmpeg_muxer. We will write this again at start recording.
-    std::string filename = recording_path + "\\" + get_current_date_time() + "." + file_extension;
+    std::string filename = recording_path + "/" + get_current_date_time() + "." + file_extension;
     obs_data_set_string(settings, "path", filename.c_str());
     unbuffered_output_filename = filename;
   }
@@ -1104,7 +1104,7 @@ void ObsInterface::startRecording(int offset) {
     }
   } else {
     obs_data_t *ffmpeg_settings = obs_data_create();
-    std::string filename = recording_path + "\\" + get_current_date_time() + "." + file_extension;
+    std::string filename = recording_path + "/" + get_current_date_time() + "." + file_extension;
     obs_data_set_string(ffmpeg_settings,  "path", filename.c_str());
     obs_output_update(output, ffmpeg_settings);
     obs_data_release(ffmpeg_settings);
