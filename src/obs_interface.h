@@ -2,14 +2,17 @@
 
 #include <obs.h>
 #include <napi.h>
-#include <windows.h>
 #include <map>
 #include <string>
 #include <optional>
 
-#define AUDIO_INPUT "wasapi_input_capture"
-#define AUDIO_OUTPUT "wasapi_output_capture"
-#define AUDIO_PROCESS "wasapi_process_output_capture"
+#include "platform.h"
+
+// The audio backend differs by platform. These stay macros so that the call
+// sites, which mix std::string comparison and strcmp, are unchanged.
+#define AUDIO_INPUT audio_input_source_id()
+#define AUDIO_OUTPUT audio_output_source_id()
+#define AUDIO_PROCESS audio_process_source_id()
 
 class ObsInterface;
 
@@ -75,7 +78,7 @@ class ObsInterface {
     void getSourcePos(std::string name, vec2* pos, vec2* size, vec2* scale, obs_sceneitem_crop* crop); // Size is returned to allow clients to calculate scale.
     void setSourcePos(std::string name, vec2* pos, vec2* scale, obs_sceneitem_crop* crop); // Size does not get set here because it's set by the source itself.
 
-    void initPreview(HWND parent); // Must call this before showPreview to setup resources.
+    void initPreview(void* parent); // Must call this before showPreview to setup resources. Native handle of the host window.
     void configurePreview(int x, int y, int width, int height); // Move and resize the preview display.
     void showPreview(); // Show the preview display.
     void hidePreview(); // Hide the preview display, but leave it running.
@@ -105,7 +108,7 @@ class ObsInterface {
     obs_encoder_t* audio_encoders[MAX_AUDIO_MIXES] = { nullptr };
     
     obs_display_t *display = nullptr;
-    HWND preview_hwnd = nullptr; // window handle for scene preview
+    PreviewSurface preview_surface = nullptr; // native child surface for scene preview
     Napi::ThreadSafeFunction jscb; // javascript callback
     std::string recording_path = ""; 
     std::string unbuffered_output_filename = "";

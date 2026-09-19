@@ -1,13 +1,17 @@
 #include <napi.h>
-#include <windows.h>
 #include <obs.h>
 #include "obs_interface.h"
 #include "utils.h"
+#include "platform.h"
 
 ObsInterface* obs = nullptr;
 
+#ifdef _WIN32
+// Ask hybrid graphics systems for the discrete GPU. There is no macOS
+// equivalent; the OS handles GPU selection itself.
 extern "C" __declspec(dllexport) DWORD NvOptimusEnablement = 1;
 extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+#endif
 
 Napi::Value ObsInit(const Napi::CallbackInfo& info) {
   bool valid = info.Length() == 3 &&
@@ -259,13 +263,15 @@ Napi::Value ObsInitPreview(const Napi::CallbackInfo& info) {
 
   Napi::Buffer<uint8_t> buffer = info[0].As<Napi::Buffer<uint8_t>>();
 
-  if (buffer.Length() < sizeof(HWND)) {
-    Napi::TypeError::New(info.Env(), "Buffer too small for HWND").ThrowAsJavaScriptException();
+  // Electron gives us a buffer holding the native window handle: an HWND on
+  // Windows, an NSView* on macOS. Both are pointer sized.
+  if (buffer.Length() < sizeof(void*)) {
+    Napi::TypeError::New(info.Env(), "Buffer too small for native window handle").ThrowAsJavaScriptException();
     return info.Env().Undefined();
   }
 
-  HWND hwnd = *reinterpret_cast<HWND*>(buffer.Data());
-  obs->initPreview(hwnd);
+  void* handle = *reinterpret_cast<void**>(buffer.Data());
+  obs->initPreview(handle);
   return info.Env().Undefined();
 }
 

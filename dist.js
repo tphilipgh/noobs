@@ -19,6 +19,32 @@ const addonSrc = path.resolve(__dirname, 'build', 'Release', packageName);
 const addonDest = path.join(distRoot, packageName);
 fs.copyFileSync(addonSrc, addonDest);
 
+if (process.platform === 'darwin') {
+  // On macOS everything we need has already been staged and had its install
+  // names fixed up by scripts/stage-macos.js, so the layout just gets copied
+  // across wholesale.
+  const stageDir = path.resolve(__dirname, 'bin', 'macos');
+
+  if (!fs.existsSync(stageDir)) {
+    console.error('bin/macos not found. Run: node scripts/stage-macos.js');
+    process.exit(1);
+  }
+
+  for (const entry of ['Frameworks', 'obs-plugins', 'data']) {
+    fs.cpSync(path.join(stageDir, entry), path.join(distRoot, entry), {
+      recursive: true,
+      dereference: false,
+      verbatimSymlinks: true,
+    });
+  }
+
+  // bin already exists, so merge into it rather than replacing it.
+  fs.cpSync(path.join(stageDir, 'bin'), distBin, { recursive: true });
+
+  console.log('Packaged macOS noobs into dist');
+  return;
+}
+
 // Now copy the .dll files we need.
 const binSrc = path.resolve(__dirname, 'bin', '64bit');
 const binDst = path.resolve(__dirname, 'dist', 'bin');

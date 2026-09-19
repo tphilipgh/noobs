@@ -1,7 +1,7 @@
-#include <windows.h>
 #include <obs.h>
 #include "utils.h"
 #include "obs_interface.h"
+#include "platform.h"
 #include <vector>
 #include <string>
 #include <graphics/matrix4.h>
@@ -140,7 +140,7 @@ int ObsInterface::reset_video(int fps, int width, int height) {
   ovi.scale_type = OBS_SCALE_BILINEAR;
   ovi.adapter = 0;
   ovi.gpu_conversion = true;
-  ovi.graphics_module = "libobs-d3d11.dll"; 
+  ovi.graphics_module = graphics_module_name();
 
   int rc = obs_reset_video(&ovi);
 
@@ -194,7 +194,7 @@ void ObsInterface::init_obs(const std::string& distPath) {
   // libobs but it works for now.
   obs_add_data_path(effectsPath.c_str());
 
-  // This must come before loading modules to initialize D3D11.
+  // This must come before loading modules to initialize the graphics stack.
   // Choose some sensible defaults that can be reconfigured.
   int rc = reset_video(60, 1920, 1080);
 
@@ -208,24 +208,10 @@ void ObsInterface::init_obs(const std::string& distPath) {
     throw std::runtime_error("Failed to reset audio!");
   }
 
-  std::vector<std::string> modules = { 
-    "obs-x264",     // Software encoder.
-    "obs-ffmpeg",   // Contains AMF (AMD) encoder support.
-    "win-capture",  // Required for basically all forms of capture on Windows.
-    "image-source", // Required for image sources.
-    "win-wasapi",   // Required for WASAPI audio input.
-    "obs-nvenc",    // Required for NVENC video encoding.
-    "obs-qsv11",    // Required for QSV video encoding.
-    "obs-filters"   // Required for audio filters.
-  };
-
-  for (const auto& module : modules) {
-    std::string modulePath = pluginPath + module + ".dll";
-    std::string moduleDataPath = pluginDataPath + module;
-
-    // NVENC fails if there is no NVENC hardware support.
-    bool allowFail = module == "obs-nvenc";
-    load_module(modulePath.c_str(), moduleDataPath.c_str(), allowFail);
+  for (const auto& module : plugin_modules()) {
+    std::string modulePath = plugin_binary_path(pluginPath, module);
+    std::string moduleDataPath = plugin_data_path(pluginPath, pluginDataPath, module);
+    load_module(modulePath.c_str(), moduleDataPath.c_str(), plugin_may_fail(module));
   }
   
   obs_post_load_modules();
@@ -800,40 +786,17 @@ void draw_callback(void* data, uint32_t cx, uint32_t cy) {
   }
 }
 
-void ObsInterface::initPreview(HWND parent) {
+void ObsInterface::initPreview(void* parent) {
   blog(LOG_INFO, "ObsInterface::initPreview");
 
-  if (!preview_hwnd) {
-    blog(LOG_INFO, "Creating preview child window");
+  if (!preview_surface) {
+    blog(LOG_INFO, "Creating preview child surface");
+    preview_surface = create_preview_surface(parent);
 
-    preview_hwnd = CreateWindowEx(
-      0,         
-      TEXT("PreviewWindowClass"),   // Window class we already registered earlier
-      TEXT("OBS Preview"),          // Window name 
-      WS_POPUP,
-      0, 0,                   // Initial position (x, y)
-      0, 0,                   // Initial size (width, height)
-      NULL,                   // No parent yet
-      NULL,                   // No menu
-      GetModuleHandle(NULL),
-      NULL
-    );
-
-    if (!preview_hwnd) {
-      blog(LOG_ERROR, "Failed to create preview child window");
+    if (!preview_surface) {
+      blog(LOG_ERROR, "Failed to create preview child surface");
       return;
     }
-
-    SetParent(preview_hwnd, parent);
-
-    LONG_PTR style = GetWindowLongPtr(preview_hwnd, GWL_STYLE);
-    style &= ~WS_POPUP;
-    style |= WS_CHILD;
-    SetWindowLongPtr(preview_hwnd, GWL_STYLE, style);
-
-    LONG_PTR exStyle = GetWindowLongPtr(preview_hwnd, GWL_EXSTYLE);
-    exStyle |= WS_EX_TRANSPARENT;
-    SetWindowLongPtr(preview_hwnd, GWL_EXSTYLE, exStyle);
   }
 
   if (!display) {
@@ -846,7 +809,7 @@ void ObsInterface::initPreview(HWND parent) {
     gs_data.format = GS_BGRA;
     gs_data.zsformat = GS_ZS_NONE;
     gs_data.num_backbuffers = 1;
-    gs_data.window.hwnd = preview_hwnd;
+    set_preview_window(&gs_data, preview_surface);
 
     display = obs_display_create(&gs_data, 0x0);
 
@@ -864,7 +827,7 @@ void ObsInterface::initPreview(HWND parent) {
 void ObsInterface::configurePreview(int x, int y, int width, int height) {
   blog(LOG_INFO, "ObsInterface::configurePreview");
 
-  if (!preview_hwnd) {
+  if (!preview_surface) {
     blog(LOG_ERROR, "Preview window not initialized");
     return;
   }
@@ -874,21 +837,8 @@ void ObsInterface::configurePreview(int x, int y, int width, int height) {
     return;
   }
 
-  blog(LOG_INFO, "Moving preview child window to (%d, %d) with size (%d x %d)", x, y, width, height);
-
-  // Resize and move the existing child window.
-  bool success = SetWindowPos(
-    preview_hwnd,                  // Handle to the child window
-    NULL,                          // No Z-order change
-    x, y,                          // New position (x, y)
-    width, height,                 // New size (width, height)
-    SWP_NOACTIVATE                 // Flags
-  );
-
-  if (!success) {
-    blog(LOG_ERROR, "Failed to resize preview window to (%d x %d)", width, height);
-    return;
-  }
+  blog(LOG_INFO, "Moving preview child surface to (%d, %d) with size (%d x %d)", x, y, width, height);
+  position_preview_surface(preview_surface, x, y, width, height);
 
   obs_display_resize(display, width, height);
   obs_display_set_enabled(display, true);
@@ -897,7 +847,7 @@ void ObsInterface::configurePreview(int x, int y, int width, int height) {
 void ObsInterface::showPreview() {
   blog(LOG_INFO, "ObsInterface::showPreview");
 
-  if (!preview_hwnd) {
+  if (!preview_surface) {
     blog(LOG_ERROR, "Preview window not initialized");
     return;
   }
@@ -907,16 +857,16 @@ void ObsInterface::showPreview() {
     return;
   }
 
-  ShowWindow(preview_hwnd, SW_SHOW);
+  show_preview_surface(preview_surface);
   obs_display_set_enabled(display, true);
 }
 
 void ObsInterface::hidePreview() {
   blog(LOG_INFO, "ObsInterface::hidePreview");
 
-  if (preview_hwnd) {
-    ShowWindow(preview_hwnd, SW_HIDE);
-    blog(LOG_INFO, "Preview child window hidden");
+  if (preview_surface) {
+    hide_preview_surface(preview_surface);
+    blog(LOG_INFO, "Preview child surface hidden");
   }
 }
 

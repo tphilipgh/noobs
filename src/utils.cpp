@@ -6,7 +6,6 @@
 #include <sstream>
 #include <mutex>
 #include "utils.h"
-#include <windows.h>
 
 void log_handler(int lvl, const char *msg, va_list args, void *p) {
   static std::mutex logMutex;
@@ -388,40 +387,4 @@ std::string get_current_date_time() {
     return ss.str();
 }
 
-LRESULT CALLBACK DisplayWndProc(
-  _In_ HWND hwnd, 
-  _In_ UINT uMsg, 
-  _In_ WPARAM wParam, 
-  _In_ LPARAM lParam)
-{
-	switch (uMsg) {
-	case WM_NCHITTEST:
-		return HTTRANSPARENT;
-	}
 
-	return DefWindowProc(hwnd, uMsg, wParam, lParam);
-}
-
-void register_preview_window_class() {
-  WNDCLASSEX klass;
-  
-  klass.cbSize = sizeof(WNDCLASSEX);
-	klass.style = CS_NOCLOSE | CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
-	klass.lpfnWndProc = DisplayWndProc;
-	klass.cbClsExtra = 0;
-	klass.cbWndExtra = 0;
-	klass.hInstance = GetModuleHandle(NULL);
-	klass.hIcon = NULL;
-	klass.hCursor = NULL;
-	klass.hbrBackground = NULL;
-	klass.lpszMenuName = NULL;
-	klass.lpszClassName = TEXT("PreviewWindowClass");
-	klass.hIconSm = NULL;
-
-	if (RegisterClassEx(&klass) == NULL) {
-		blog(LOG_ERROR, "Failed to register window class");
-    throw new std::runtime_error("Failed to register window class");
-	}
-
-  blog(LOG_INFO, "Registered preview window class");
-}
