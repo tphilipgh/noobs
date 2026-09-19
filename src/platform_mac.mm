@@ -66,7 +66,14 @@ PreviewSurface create_preview_surface(void* parent) {
     view.wantsLayer = NO;
     view.autoresizingMask = NSViewNotSizable;
 
-    [parentView addSubview:view positioned:NSWindowBelow relativeTo:nil];
+    // Above, not below. Electron's web contents fill the window and paint an
+    // opaque background, so a subview underneath them renders correctly but is
+    // never visible. The renderer leaves a gap where the preview belongs.
+    [parentView addSubview:view positioned:NSWindowAbove relativeTo:nil];
+
+    blog(LOG_INFO,
+         "Preview view added: wantsLayer=%d layer=%p parentLayer=%p",
+         (int)view.wantsLayer, (void*)view.layer, (void*)parentView.layer);
   };
 
   if ([NSThread isMainThread]) {
