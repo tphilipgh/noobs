@@ -946,28 +946,26 @@ ObsInterface::ObsInterface(
 ObsInterface::~ObsInterface() {
   blog(LOG_DEBUG, "Shutting down");
 
+  // Note these loops clear their container afterwards rather than erasing as
+  // they go. Erasing the current element from the container being iterated
+  // invalidates the iterator the range-for then increments, which is
+  // undefined behaviour and reliably segfaults on macOS.
   for (auto& kv : volmeters) {
     obs_volmeter_t* volmeter = kv.second;
     obs_volmeter_remove_callback(volmeter, volmeter_callback, this);
     obs_volmeter_detach_source(volmeter);
     obs_volmeter_destroy(volmeter);
     blog(LOG_INFO, "Volmeter deleted for source: %s", kv.first.c_str());
-    volmeters.erase(kv.first);
   }
+
+  volmeters.clear();
 
   for (auto& kv : volmeter_cb_ctx) {
     SignalContext* ctx = kv.second;
     delete ctx;
-    volmeter_cb_ctx.erase(kv.first);
   }
 
-  delete starting_ctx;
-  delete start_ctx;
-  delete stopping_ctx;
-  delete stop_ctx;
-  delete activate_ctx;
-  delete deactivate_ctx;
-  delete converted_ctx;
+  volmeter_cb_ctx.clear();
 
   for (auto& kv : sources) {
     std::string name = kv.first;
@@ -985,8 +983,9 @@ ObsInterface::~ObsInterface() {
 
     blog(LOG_DEBUG, "Releasing source: %s", name.c_str());
     obs_source_release(source);
-    sources.erase(name);
   }
+
+  sources.clear();
 
   if (scene) {
     blog(LOG_DEBUG, "Releasing scene");
@@ -998,10 +997,32 @@ ObsInterface::~ObsInterface() {
       blog(LOG_DEBUG, "Force stopping output");
       obs_output_force_stop(output);
     }
-      
+
+    // Disconnect before the signal contexts are freed below. Stopping the
+    // output above emits stopping/stop/deactivate, and the handler reads the
+    // context it was connected with, so the two must not outlive each other.
+    blog(LOG_DEBUG, "Disconnecting output signal handlers");
+    disconnect_signal_handlers(output);
+
     blog(LOG_DEBUG, "Releasing output");
     obs_output_release(output);
   }
+
+  delete starting_ctx;
+  delete start_ctx;
+  delete stopping_ctx;
+  delete stop_ctx;
+  delete activate_ctx;
+  delete deactivate_ctx;
+  delete converted_ctx;
+
+  starting_ctx = nullptr;
+  start_ctx = nullptr;
+  stopping_ctx = nullptr;
+  stop_ctx = nullptr;
+  activate_ctx = nullptr;
+  deactivate_ctx = nullptr;
+  converted_ctx = nullptr;
 
   // if (video_encoder) {
   //   blog(LOG_DEBUG, "Releasing video encoder");
@@ -1012,6 +1033,23 @@ ObsInterface::~ObsInterface() {
   //   blog(LOG_DEBUG, "Releasing audio encoder");
   //   obs_encoder_release(audio_encoder);
   // }
+
+  // The display holds a reference to the native preview surface, and
+  // obs_shutdown tears down the graphics subsystem underneath it. Destroy it
+  // first, or shutdown touches a surface the host window may already have
+  // freed, which segfaults on macOS.
+  if (display) {
+    blog(LOG_DEBUG, "Destroying preview display");
+    obs_display_remove_draw_callback(display, draw_callback, this);
+    obs_display_destroy(display);
+    display = nullptr;
+  }
+
+  if (preview_surface) {
+    blog(LOG_DEBUG, "Destroying preview surface");
+    destroy_preview_surface(preview_surface);
+    preview_surface = nullptr;
+  }
 
   blog(LOG_DEBUG, "Now shutting down OBS");
   obs_shutdown();
